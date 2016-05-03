@@ -377,10 +377,13 @@ Request.prototype.init = function (options) {
   if (options.hawk) {
     self.hawk(options.hawk)
   }
-
+  /*
+  // Broken -- httpSignature spec specifies that signatures
+  // can be created with the Content-Length header as well,
+  // which does not get computed until later.
   if (options.httpSignature) {
     self.httpSignature(options.httpSignature)
-  }
+  }*/
 
   if (options.auth) {
     if (Object.prototype.hasOwnProperty.call(options.auth, 'username')) {
@@ -588,10 +591,24 @@ Request.prototype.init = function (options) {
         if (!err && !isNaN(length)) {
           self.setHeader('content-length', length)
         }
-        end()
+        // HTTP Signatures can rely on the content-length header
+        // according to their spec.
+        if (options.httpSignature) {
+          self.httpSignature(options.httpSignature, function () {
+            end()
+          })
+        } else {
+          end()
+        }
       })
     } else {
-      end()
+      if (options.httpSignature) {
+        self.httpSignature(options.httpSignature, function () {
+          end()
+        })
+      } else {
+        end()
+      }
     }
 
     self.ntick = true
@@ -726,6 +743,10 @@ Request.prototype.start = function () {
   // start() is called once we are ready to send the outgoing HTTP request.
   // this is usually called on the first write(), end() or on nextTick()
   var self = this
+
+  console.log("++++++++++++++++++++++");
+  console.log("Starting request with headers: ", self.headers);
+  console.log("++++++++++++++++++++++");
 
   if (self._aborted) {
     return
@@ -1313,9 +1334,9 @@ Request.prototype.aws = function (opts, now) {
 
   return self
 }
-Request.prototype.httpSignature = function (opts) {
+Request.prototype.httpSignature = function (opts, callback) {
   var self = this
-  httpSignature.signRequest({
+  var httpReq = {
     getHeader: function(header) {
       return self.getHeader(header, self.headers)
     },
@@ -1324,10 +1345,8 @@ Request.prototype.httpSignature = function (opts) {
     },
     method: self.method,
     path: self.path
-  }, opts)
-  debug('httpSignature authorization', self.getHeader('authorization'))
-
-  return self
+  }
+  httpSignature.signRequest(httpReq, opts, callback)
 }
 Request.prototype.hawk = function (opts) {
   var self = this

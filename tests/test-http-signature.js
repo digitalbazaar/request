@@ -4,6 +4,7 @@ var http = require('http')
   , request = require('../index')
   , httpSignature = require('http-signature')
   , tape = require('tape')
+  , sshpk = require('sshpk')
 
 var privateKeyPEMs = {}
 
@@ -87,6 +88,61 @@ tape('correct key', function(t) {
     t.end()
   })
 })
+
+tape('correct key with specified headers', function(t) {
+  var options = {
+    httpSignature: {
+      keyId: 'key-1',
+      key: privateKeyPEMs['key-1'],
+      headers: ['date', 'host', 'request-line']
+    }
+  }
+  request('http://localhost:6767', options, function(err, res, body) {
+    t.equal(err, null)
+    t.equal(200, res.statusCode)
+    t.end()
+  })
+})
+
+tape('correct key with custom signing function', function(t) {
+  var options = {
+    httpSignature: {
+      keyId: 'key-1',
+      key: privateKeyPEMs['key-1'],
+      algorithm: 'rsa-sha256',
+      sign: function(data, options, callback) {
+        var key = sshpk.parsePrivateKey(privateKeyPEMs['key-1'])
+        var sig = key.createSign().update(data).sign()
+        callback(null, sig)
+      }
+    }
+  }
+  request('http://localhost:6767', options, function(err, res, body) {
+    t.equal(err, null)
+    t.equal(200, res.statusCode)
+    t.end()
+  })
+})
+
+tape('malformed signature with custom signing function', function(t) {
+  var options = {
+    httpSignature: {
+      keyId: 'key-1',
+      key: privateKeyPEMs['key-1'],
+      algorithm: 'rsa-sha256',
+      sign: function(data, options, callback) {
+        var sig = 'x252sdfj767za5454Bw23a';
+        callback(null, sig)
+      }
+    }
+  }
+  request('http://localhost:6767', options, function(err, res, body) {
+    t.equal(err, null)
+    t.equal(400, res.statusCode)
+    t.end()
+  })
+})
+
 
 tape('incorrect key', function(t) {
   var options = {
