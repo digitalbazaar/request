@@ -18,6 +18,7 @@ var FormData = require('form-data')
 var extend = require('extend')
 var isstream = require('isstream')
 var isTypedArray = require('is-typedarray').strict
+var jsprim = require('jsprim');
 var helpers = require('./lib/helpers')
 var cookies = require('./lib/cookies')
 var getProxyFromURI = require('./lib/getProxyFromURI')
@@ -1410,6 +1411,80 @@ Request.prototype.aws = function (opts, now) {
 }
 Request.prototype.httpSignature = function (opts) {
   var self = this
+
+  if(opts.sign && typeof opts.sign === 'function') {
+    var signer = httpSignature.createSigner({sign: opts.sign});
+    // var date = signer.writeDateHeader();
+
+    // NOTE: the following code is from
+    // https://github.com/joyent/node-http-signature/blob/master/lib/signer.js#L307-L343
+
+    // FIXME: remove semis to conform to style
+
+    if (!self.getHeader('Date')) {
+      self.setHeader('Date', jsprim.rfc1123(new Date()));
+    }
+    if (!opts.headers) {
+      opts.headers = ['date'];
+    }
+    // var i;
+    // var stringToSign = '';
+    for (var i = 0; i < opts.headers.length; i++) {
+      if (typeof (opts.headers[i]) !== 'string') {
+        throw new TypeError('options.headers must be an array of Strings');
+      }
+
+      var h = opts.headers[i].toLowerCase();
+
+      if (h === 'request-line') {
+        if (!opts.strict) {
+          // FIXME: self.httpVersion is undefined, is it necessary to support
+          // the older draft spec?
+          /**
+           * We allow headers from the older spec drafts if `strict` parsing
+           * isn't specified in options.
+           */
+          // stringToSign +=
+          //   self.method + ' ' + self.path + ' HTTP/' + self.httpVersion;
+        } else {
+          /* Strict parsing doesn't allow older draft headers. */
+          throw (new StrictParsingError('request-line is not a valid header ' +
+            'with strict parsing enabled.'));
+        }
+      } else if (h === '(request-target)') {
+        // stringToSign +=
+        //   '(request-target): ' + self.method.toLowerCase() + ' ' + self.path;
+        let target = self.method.toLowerCase() + ' ' + self.path
+
+        // NOTE: (request-target) is not a header on the HTTP request, the
+        // writeHeader API is used here to pass the target value into the
+        // `data` of the user supplied `sign` function.
+        signer.writeHeader(h, target)
+
+      } else {
+        var value = self.getHeader(h);
+        if (value === undefined || value === '') {
+          throw new MissingHeaderError(h + ' was not in the request');
+        }
+        signer.writeHeader(h, value)
+        // stringToSign += h + ': ' + value;
+      }
+
+      // if ((i + 1) < opts.headers.length) {
+      //   stringToSign += '\n';
+      // }
+    }
+    signer.sign(function (err, authz) {
+      if (err) {
+        // TODO: what happens on err?
+        console.log('ERROR', err)
+        return
+      }
+      self.setHeader('authorization', authz);
+    })
+    return self
+  }
+
   httpSignature.signRequest({
     getHeader: function (header) {
       return self.getHeader(header, self.headers)
